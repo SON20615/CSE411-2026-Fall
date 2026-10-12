@@ -36,8 +36,75 @@ public final class Ll1ParsingTable {
 
   /** Constructs the complete table, including conflicting cells when they exist. */
   public static Ll1ParsingTable build(final Grammar grammar) {
-    // TODO: Complete this method
-    return null; // TODO: replace the return value.
+    // Step 1: FIRST sets
+    final Map<String, Set<String>> first = initialSets(grammar);
+    boolean changed = true;
+    while (changed) {
+      changed = false;
+      for (final Production production : grammar.getProductions()) {
+        final Set<String> sequenceFirst =
+            firstOfSequence(production.getRightHandSide(), grammar, first);
+        // Epsilon is kept here, since FIRST(A) must record that A can derive the empty string.
+        if (first.get(production.getLeftHandSide()).addAll(sequenceFirst)) {
+          changed = true;
+        }
+      }
+    }
+
+    // Step 2: FOLLOW sets
+    final Map<String, Set<String>> follow = initialSets(grammar);
+    follow.get(grammar.getStartSymbol()).add(Grammar.END_MARKER);
+    changed = true;
+    while (changed) {
+      changed = false;
+      for (final Production production : grammar.getProductions()) {
+        final String left = production.getLeftHandSide();
+        final List<String> right = production.getRightHandSide();
+        for (int i = 0; i < right.size(); i++) {
+          final String symbol = right.get(i);
+          if (!grammar.getNonterminals().contains(symbol)) {
+            continue;
+          }
+          // beta is everything after this symbol; an empty beta yields {epsilon}.
+          final Set<String> betaFirst =
+              firstOfSequence(right.subList(i + 1, right.size()), grammar, first);
+          if (addWithoutEpsilon(follow.get(symbol), betaFirst)) {
+            changed = true;
+          }
+          // If beta can vanish, whatever follows the left-hand side also follows this symbol.
+          if (betaFirst.contains(Grammar.EPSILON)
+              && !symbol.equals(left)
+              && follow.get(symbol).addAll(follow.get(left))) {
+            changed = true;
+          }
+        }
+      }
+    }
+
+    // Step 3: fill the parsing table cells.
+    final Map<String, Map<String, List<Production>>> cells =
+        new LinkedHashMap<String, Map<String, List<Production>>>();
+    for (final String nonterminal : grammar.getNonterminals()) {
+      cells.put(nonterminal, new LinkedHashMap<String, List<Production>>());
+    }
+    for (final Production production : grammar.getProductions()) {
+      final String left = production.getLeftHandSide();
+      final Set<String> rightFirst =
+          firstOfSequence(production.getRightHandSide(), grammar, first);
+      for (final String terminal : rightFirst) {
+        if (!Grammar.EPSILON.equals(terminal)) {
+          add(cells, left, terminal, production);
+        }
+      }
+      // If the right-hand side can vanish, select it on every token that may follow the left side.
+      if (rightFirst.contains(Grammar.EPSILON)) {
+        for (final String terminal : follow.get(left)) {
+          add(cells, left, terminal, production);
+        }
+      }
+    }
+
+    return new Ll1ParsingTable(grammar, first, follow, cells);
   }
 
   public Grammar getGrammar() {
