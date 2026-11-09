@@ -117,30 +117,100 @@ public class SymbolTableBuilder {
     @Override
     public boolean visit(final FieldDeclaration node) {
       // TODO
+      // Fields are only accessed through FieldAccess, which is resolved in the
+      // type checking phase, so they are recorded in fieldMap only.
+      for (final Object o : node.fragments()) {
+        final VariableDeclarationFragment f = (VariableDeclarationFragment) o;
+        final Pair<String, String> key = new Pair<>(this.className, f
+            .getName().getIdentifier());
+        if (this.fieldMap.containsKey(key)) {
+          throw new Error(f, "Duplicate field " + key.second + " in class "
+              + this.className);
+        }
+        this.fieldMap.put(key, node);
+      }
       return false;
     }
 
     @Override
     public boolean visit(final MethodDeclaration node) {
       // TODO
+      // Each method starts with a fresh local scope.
+      this.nameMap.clear();
+      this.localNames.clear();
+
+      for (final Object o : node.parameters()) {
+        final SingleVariableDeclaration p = (SingleVariableDeclaration) o;
+        final String name = p.getName().getIdentifier();
+        if (!this.localNames.add(name)) {
+          throw new Error(p, "Duplicate parameter " + name);
+        }
+        this.nameMap.put(name, p);
+      }
+
+      if (node.getBody() != null) {
+        for (final Object o : node.getBody().statements()) {
+          ((Statement) o).accept(this);
+        }
+      }
       return false;
     }
 
     @Override
     public boolean visit(final MethodInvocation node) {
       // TODO
+      final Expression e = node.getExpression();
+      final String name = node.getName().getIdentifier();
+      // An invocation is a call to a method of the current class if it has
+      // no receiver or if its receiver is the current class name. Any other
+      // receiver (e.g., StaticJavaLib) is a library call and is not resolved.
+      final boolean local = (e == null)
+          || ((e instanceof SimpleName) && ((SimpleName) e).getIdentifier()
+              .equals(this.className));
+      if (local) {
+        final MethodDeclaration decl = this.methodMap.get(name);
+        if (decl == null) {
+          throw new Error(node, "Undefined method " + name);
+        }
+        this.result.put(node, decl);
+      } else if (!(e instanceof SimpleName)) {
+        e.accept(this);
+      }
+
+      for (final Object o : node.arguments()) {
+        ((ASTNode) o).accept(this);
+      }
       return false;
     }
 
     @Override
     public boolean visit(final SimpleName node) {
       // TODO
+      final ASTNode decl = this.nameMap.get(node.getIdentifier());
+      if (decl == null) {
+        throw new Error(node, "Undefined variable " + node.getIdentifier());
+      }
+      this.result.put(node, decl);
       return false;
     }
 
     @Override
     public boolean visit(final VariableDeclarationStatement node) {
       // TODO
+      // The declared names are not references, so only the initializers are
+      // visited. The variable is registered after its initializer is visited,
+      // so that an initializer cannot refer to the variable being declared.
+      for (final Object o : node.fragments()) {
+        final VariableDeclarationFragment f = (VariableDeclarationFragment) o;
+        final String name = f.getName().getIdentifier();
+        if (f.getInitializer() != null) {
+          f.getInitializer().accept(this);
+        }
+        if (!this.localNames.add(name)) {
+          throw new Error(f, "Duplicate variable " + name);
+        }
+        this.nameMap.put(name, node);
+      }
       return false;
     }
 
@@ -178,6 +248,31 @@ public class SymbolTableBuilder {
     @Override
     public boolean visit(final TypeDeclaration node) {
       // TODO
+      this.className = node.getName().getIdentifier();
+      this.nameMap.clear();
+      this.methodMap.clear();
+      this.localNames.clear();
+
+      // The public class (holding main) is not recorded in classMap.
+      if (!this.hasPublicModifier(node.modifiers())) {
+        this.classMap.put(this.className, node);
+      }
+
+      // Register all methods first so that forward references resolve.
+      for (final MethodDeclaration m : node.getMethods()) {
+        if (!m.isConstructor()) {
+          this.methodMap.put(m.getName().getIdentifier(), m);
+        }
+      }
+
+      for (final FieldDeclaration f : node.getFields()) {
+        f.accept(this);
+      }
+      for (final MethodDeclaration m : node.getMethods()) {
+        if (!m.isConstructor()) {
+          m.accept(this);
+        }
+      }
       return false;
     }
   }
