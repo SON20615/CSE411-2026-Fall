@@ -7,3 +7,4 @@ project/project
 *.ll
 *.o
 /sjc-ll-gen/output/
+.DS_Store
