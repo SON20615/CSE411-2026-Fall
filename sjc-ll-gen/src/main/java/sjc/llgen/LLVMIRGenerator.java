@@ -539,6 +539,7 @@ public final class LLVMIRGenerator {
 
       @Override
       public boolean visit(final PostfixExpression node) {
+        // x++ or a[i]--
         Address address = emitAddress(node.getOperand());
         
         String oldValue = temp();
